@@ -1,0 +1,10 @@
+# Build artifacts
+bipass
+*.o
+*.a
+
+# Editor/IDE files
+.vscode/
+.idea/
+*.swp
+*~
