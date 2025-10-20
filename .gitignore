@@ -8,3 +8,9 @@ bipass
 .idea/
 *.swp
 *~
+
+# AI Assistants
+CLAUDE.md
+GEMINI.md
+
+.gitignore
