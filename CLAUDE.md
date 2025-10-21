@@ -1,74 +1,55 @@
-# Using Gemini CLI for Large Codebase Analysis
+# Claude Code Guidance: bipass
 
-When analyzing large codebases or multiple files that might exceed context limits, use the Gemini CLI with its massive
-context window. Use `gemini -p` to leverage Google Gemini's large context capacity.
+This document provides essential context for working on the `bipass` codebase.
 
-## File and Directory Inclusion Syntax
+## Project Purpose
 
-Use the `@` syntax to include files and directories in your Gemini prompts. The paths should be relative to WHERE you run the
-  gemini command:
+`bipass` is a command-line utility written in C to generate BIP39 mnemonic phrases for crypto wallets and simpler random-word passphrases.
 
-### Examples:
+## Build and Execution
 
-**Single file analysis:**
-gemini -p "@src/main.py Explain this file's purpose and structure"
+- **Prerequisites:** `make`, `gcc`, `libssl-dev`.
+- **Build:** Run `make`. This creates the `bipass` executable. The build process automatically generates `src/wordlist.h` from `scripts/generate_wordlist.sh`.
+- **Usage:**
+  - `bipass <12|15|18|21|24>`: Generate a BIP39 mnemonic.
+  - `bipass --password <1-100>`: Generate a non-BIP39 passphrase.
+  - `bipass --validate "<phrase>"`: Validate a BIP39 mnemonic.
 
-Multiple files:
-gemini -p "@package.json @src/index.js Analyze the dependencies used in the code"
+## Core Architecture
 
-Entire directory:
-gemini -p "@src/ Summarize the architecture of this codebase"
+The main logic is in `src/bipass.c`. The program operates in two main modes.
 
-Multiple directories:
-gemini -p "@src/ @tests/ Analyze test coverage for the source code"
+### 1. BIP39 Mnemonic Mode
 
-Current directory and subdirectories:
-gemini -p "@./ Give me an overview of this entire project"
+- **Function:** `generate_mnemonic` (`src/bipass.c:32`)
+- **Process:**
+  1.  Reads `N` bytes of entropy from `/dev/urandom` (`generate_entropy` at `src/bipass.c:12`).
+  2.  Calculates a checksum by taking the first `(word_count / 3)` bits of the SHA256 hash of the entropy (`src/bipass.c:44`).
+  3.  Appends the checksum to the entropy.
+  4.  Splits the resulting bits into 11-bit segments, which correspond to indices in the `wordlist` (`src/wordlist.h`).
 
-# Or use --all_files flag:
-gemini --all_files -p "Analyze the project structure and dependencies"
+### 2. Password Mode
 
-Implementation Verification Examples
+- **Function:** `generate_password` (`src/bipass.c:79`)
+- **Process:**
+  1.  A simpler mode that does not involve a checksum.
+  2.  For each requested word, it generates 16 bits of entropy from `/dev/urandom`.
+  3.  Masks the 16 bits to 11 bits (`& 0x7FF`) to select a random word from the list (`src/bipass.c:85`). This is **not** suitable for crypto wallets.
 
-Check if a feature is implemented:
-gemini -p "@src/ @lib/ Has dark mode been implemented in this codebase? Show me the relevant files and functions"
+### Validation
 
-Verify authentication implementation:
-gemini -p "@src/ @middleware/ Is JWT authentication implemented? List all auth-related endpoints and middleware"
+- **Function:** `validate_mnemonic` (`src/bipass.c:155`)
+- **Process:** Reverses the BIP39 generation. It converts words back to their 11-bit indices, separates the entropy from the checksum, and verifies that `SHA256(entropy)` matches the provided checksum.
 
-Check for specific patterns:
-gemini -p "@src/ Are there any React hooks that handle WebSocket connections? List them with file paths"
+## Security Notes
 
-Verify error handling:
-gemini -p "@src/ @api/ Is proper error handling implemented for all API endpoints? Show examples of try-catch blocks"
+- **Randomness:** Entropy is sourced from `/dev/urandom`, which is a strong choice.
+- **Memory Management:** The tool uses `explicit_bzero()` to wipe sensitive data like entropy and the final mnemonic from memory before exiting. This is a critical security feature to prevent secrets from being exposed in memory dumps or swap. Key locations are `src/bipass.c:94` and `src/bipass.c:282`.
+- **Dependencies:** Relies on OpenSSL for `SHA256`.
 
-Check for rate limiting:
-gemini -p "@backend/ @middleware/ Is rate limiting implemented for the API? Show the implementation details"
+## Key Files
 
-Verify caching strategy:
-gemini -p "@src/ @lib/ @services/ Is Redis caching implemented? List all cache-related functions and their usage"
-
-Check for specific security measures:
-gemini -p "@src/ @api/ Are SQL injection protections implemented? Show how user inputs are sanitized"
-
-Verify test coverage for features:
-gemini -p "@src/payment/ @tests/ Is the payment processing module fully tested? List all test cases"
-
-When to Use Gemini CLI
-
-Use gemini -p when:
-- Analyzing entire codebases or large directories
-- Comparing multiple large files
-- Need to understand project-wide patterns or architecture
-- Current context window is insufficient for the task
-- Working with files totaling more than 100KB
-- Verifying if specific features, patterns, or security measures are implemented
-- Checking for the presence of certain coding patterns across the entire codebase
-
-Important Notes
-
-- Paths in @ syntax are relative to your current working directory when invoking gemini
-- The CLI will include file contents directly in the context
-- No need for --yolo flag for read-only analysis
-- Gemini's context window can handle entire codebases that would overflow Claude's context
-- When checking implementations, be specific about what you're looking for to get accurate results
+- `src/bipass.c`: Contains all generation, validation, and command-line logic.
+- `src/wordlist.h`: The BIP39 English wordlist, generated by a shell script.
+- `Makefile`: Defines build targets and dependencies.
+- `scripts/generate_wordlist.sh`: Script to fetch the wordlist and create the header file.
