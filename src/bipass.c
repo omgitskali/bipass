@@ -5,92 +5,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#include <curl/curl.h>
 #include <openssl/sha.h>
 
-#define WORDLIST_URL "https://raw.githubusercontent.com/bitcoin/bips/master/bip-0039/english.txt"
-#define MAX_WORDS 2048
+#include "wordlist.h"
+
 #define MAX_WORD_LEN 16
-
-typedef struct {
-    char *data;
-    size_t size;
-} memory_t;
-
-static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp) {
-    size_t realsize = size * nmemb;
-    memory_t *mem = (memory_t *)userp;
-
-    char *ptr = realloc(mem->data, mem->size + realsize + 1);
-    if (!ptr) {
-        fprintf(stderr, "Out of memory\n");
-        return 0;
-    }
-
-    mem->data = ptr;
-    memcpy(&(mem->data[mem->size]), contents, realsize);
-    mem->size += realsize;
-    mem->data[mem->size] = 0;
-
-    return realsize;
-}
-
-char **fetch_wordlist(void) {
-    CURL *curl;
-    CURLcode res;
-    memory_t chunk = {0};
-
-    curl = curl_easy_init();
-    if (!curl) {
-        fprintf(stderr, "Failed to initialize curl\n");
-        return NULL;
-    }
-
-    curl_easy_setopt(curl, CURLOPT_URL, WORDLIST_URL);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "bipass/1.0");
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-
-    res = curl_easy_perform(curl);
-    curl_easy_cleanup(curl);
-
-    if (res != CURLE_OK) {
-        fprintf(stderr, "Failed to fetch wordlist: %s\n", curl_easy_strerror(res));
-        free(chunk.data);
-        return NULL;
-    }
-
-    char **wordlist = malloc(MAX_WORDS * sizeof(char *));
-    if (!wordlist) {
-        free(chunk.data);
-        return NULL;
-    }
-
-    int word_count = 0;
-    char *line = strtok(chunk.data, "\n");
-    while (line && word_count < MAX_WORDS) {
-        wordlist[word_count] = strdup(line);
-        word_count++;
-        line = strtok(NULL, "\n");
-    }
-
-    free(chunk.data);
-
-    if (word_count != MAX_WORDS) {
-        fprintf(stderr, "Warning: Expected %d words, got %d\n", MAX_WORDS, word_count);
-    }
-
-    return wordlist;
-}
-
-void free_wordlist(char **wordlist) {
-    if (!wordlist) return;
-    for (int i = 0; i < MAX_WORDS; i++) {
-        free(wordlist[i]);
-    }
-    free(wordlist);
-}
 
 int generate_entropy(unsigned char *entropy, size_t len) {
     FILE *f = fopen("/dev/urandom", "rb");
@@ -110,10 +29,9 @@ int generate_entropy(unsigned char *entropy, size_t len) {
     return 0;
 }
 
-void generate_mnemonic(char **wordlist, int word_count, char *output, size_t output_len) {
+void generate_mnemonic(const char **wordlist, int word_count, char *output, size_t output_len) {
     int entropy_bits = (word_count * 11) - (word_count / 3);
     int entropy_bytes = entropy_bits / 8;
-    int checksum_bits = word_count / 3;
 
     unsigned char entropy[32] = {0};
     unsigned char hash[SHA256_DIGEST_LENGTH];
@@ -151,10 +69,116 @@ void generate_mnemonic(char **wordlist, int word_count, char *output, size_t out
     }
 }
 
+int find_word_index(const char *word) {
+    for (int i = 0; i < WORD_COUNT; i++) {
+        if (strcasecmp(word, wordlist[i]) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int validate_mnemonic(const char *mnemonic_phrase, char *error_reason, size_t reason_len) {
+    char *mnemonic_copy = strdup(mnemonic_phrase);
+    if (!mnemonic_copy) {
+        snprintf(error_reason, reason_len, "Memory allocation failed");
+        return 0;
+    }
+
+    char *words[24];
+    int word_count = 0;
+    char *token = strtok(mnemonic_copy, " ");
+    while (token != NULL && word_count < 24) {
+        words[word_count++] = token;
+        token = strtok(NULL, " ");
+    }
+
+    if (word_count != 12 && word_count != 15 && word_count != 18 &&
+        word_count != 21 && word_count != 24) {
+        snprintf(error_reason, reason_len, "Invalid number of words (%d)", word_count);
+        free(mnemonic_copy);
+        return 0;
+    }
+
+    int indices[24];
+    for (int i = 0; i < word_count; i++) {
+        indices[i] = find_word_index(words[i]);
+        if (indices[i] == -1) {
+            snprintf(error_reason, reason_len, "Invalid word '%s'", words[i]);
+            free(mnemonic_copy);
+            return 0;
+        }
+    }
+
+    free(mnemonic_copy);
+
+    int total_bits = word_count * 11;
+    int checksum_bits = word_count / 3;
+    int entropy_bits = total_bits - checksum_bits;
+    int entropy_bytes = entropy_bits / 8;
+
+    unsigned char combined_data[33] = {0};
+    int bit_offset = 0;
+
+    for (int i = 0; i < word_count; i++) {
+        unsigned int index = indices[i];
+        for (int j = 10; j >= 0; j--) {
+            if ((index >> j) & 1) {
+                combined_data[bit_offset / 8] |= (1 << (7 - (bit_offset % 8)));
+            }
+            bit_offset++;
+        }
+    }
+
+    unsigned char entropy[32] = {0};
+    memcpy(entropy, combined_data, entropy_bytes);
+    if (entropy_bits % 8 != 0) {
+        entropy[entropy_bytes - 1] &= (0xFF << (8 - (entropy_bits % 8)));
+    }
+
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256(entropy, entropy_bytes, hash);
+
+    unsigned char calculated_checksum = hash[0] >> (8 - checksum_bits);
+
+    unsigned char provided_checksum = 0;
+    int current_bit = entropy_bits;
+    for (int i = 0; i < checksum_bits; i++) {
+        int byte_idx = current_bit / 8;
+        int bit_idx_in_byte = current_bit % 8;
+        if ((combined_data[byte_idx] >> (7 - bit_idx_in_byte)) & 1) {
+            provided_checksum |= (1 << (checksum_bits - 1 - i));
+        }
+        current_bit++;
+    }
+
+    explicit_bzero(combined_data, sizeof(combined_data));
+    explicit_bzero(entropy, sizeof(entropy));
+
+    if (provided_checksum != calculated_checksum) {
+        snprintf(error_reason, reason_len, "Checksum mismatch");
+        return 0;
+    }
+
+    return 1;
+}
+
 int main(int argc, char *argv[]) {
+    if (argc == 3 && strcmp(argv[1], "--validate") == 0) {
+        char reason[128] = {0};
+        if (validate_mnemonic(argv[2], reason, sizeof(reason))) {
+            printf("Valid BIP39 mnemonic\n");
+            return 0;
+        } else {
+            fprintf(stderr, "Invalid BIP39 mnemonic: %s\n", reason);
+            return 1;
+        }
+    }
+
     if (argc != 2) {
         fprintf(stderr, "Usage: %s <word_count>\n", argv[0]);
-        fprintf(stderr, "Valid word counts: 12, 15, 18, 21, 24\n");
+        fprintf(stderr, "   or: %s --validate \"<mnemonic>\"\n", argv[0]);
+        fprintf(stderr, "Valid word counts for generation: 12, 15, 18, 21, 24\n");
         return 1;
     }
 
@@ -165,22 +189,12 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    curl_global_init(CURL_GLOBAL_DEFAULT);
-
-    char **wordlist = fetch_wordlist();
-    if (!wordlist) {
-        curl_global_cleanup();
-        return 1;
-    }
-
     char mnemonic[512] = {0};
     generate_mnemonic(wordlist, word_count, mnemonic, sizeof(mnemonic));
 
     printf("%s\n", mnemonic);
 
     explicit_bzero(mnemonic, sizeof(mnemonic));
-    free_wordlist(wordlist);
-    curl_global_cleanup();
 
     return 0;
 }

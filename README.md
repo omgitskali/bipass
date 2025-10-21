@@ -15,9 +15,9 @@ A simple BIP39 seed phrase generator written in C that generates cryptographical
 
 ### Prerequisites
 
-- libcurl development headers (`libcurl4-openssl-dev` on Debian/Ubuntu)
 - OpenSSL development headers (`libssl-dev` on Debian/Ubuntu)
 - GCC or compatible C compiler
+- `curl` to generate the wordlist during the build (can be removed after first build)
 
 ### Build from source
 
