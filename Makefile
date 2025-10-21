@@ -3,7 +3,7 @@ CFLAGS = -Wall -Wextra -O2 -std=c11
 LDFLAGS = -lssl -lcrypto
 
 SRC = src/bipass.c
-TARGET = bipass
+TARGET = bin/bipass
 WORDLIST_HEADER = src/wordlist.h
 
 all: $(TARGET)
