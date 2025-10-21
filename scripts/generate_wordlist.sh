@@ -4,9 +4,7 @@ set -e
 OUTPUT_FILE="src/wordlist.h"
 WORDLIST_URL="https://raw.githubusercontent.com/bitcoin/bips/master/bip-0039/english.txt"
 
-# In a real-world scenario, we'd use curl or wget here.
-# For this self-contained example, we'll embed the list.
-# This makes the script runnable without external network dependencies during the build.
+#todo: actual network fetching
 WORDLIST_CONTENT=$(cat <<'EOF'
 abandon
 ability
@@ -2038,7 +2036,6 @@ echo "#define WORD_COUNT 2048" >> "$OUTPUT_FILE"
 echo "" >> "$OUTPUT_FILE"
 echo "static const char *wordlist[WORD_COUNT] = {" >> "$OUTPUT_FILE"
 
-# Process each word and add it to the array
 echo "$WORDLIST_CONTENT" | awk '{printf "    \"%s\",\n", $1}' >> "$OUTPUT_FILE"
 
 echo "};" >> "$OUTPUT_FILE"

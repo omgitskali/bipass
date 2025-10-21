@@ -47,8 +47,7 @@ void generate_mnemonic(const char **wordlist, int word_count, char *output, size
     memcpy(combined, entropy, entropy_bytes);
     combined[entropy_bytes] = hash[0];
 
-    output[0] = '\0';
-
+    int offset = 0;
     for (int i = 0; i < word_count; i++) {
         int bit_offset = i * 11;
         int byte_offset = bit_offset / 8;
@@ -62,34 +61,41 @@ void generate_mnemonic(const char **wordlist, int word_count, char *output, size
         }
         index &= 0x7FF;
 
-        if (i > 0) {
-            strncat(output, " ", output_len - strlen(output) - 1);
+        int written = snprintf(output + offset, output_len - offset, "%s%s",
+                               (i > 0) ? " " : "", wordlist[index]);
+
+        if (written < 0 || written >= output_len - offset) {
+            fprintf(stderr, "Error generating mnemonic: buffer too small\n");
+            output[0] = '\0'; // Clear output on error
+            break;
         }
-        strncat(output, wordlist[index], output_len - strlen(output) - 1);
+        offset += written;
     }
 }
 
 void generate_password(const char **wordlist, int word_count, char *output, size_t output_len) {
-    // Generate password mode: random words without BIP39 checksum
-    // Uses 2 bytes of entropy per word to cover full 2048 wordlist (11 bits needed)
+    
     int entropy_bytes = word_count * 2;
-    unsigned char entropy[200] = {0};  // Max 100 words * 2 bytes
+    unsigned char entropy[200] = {0};  
 
     if (generate_entropy(entropy, entropy_bytes) != 0) {
         fprintf(stderr, "Failed to generate entropy\n");
         return;
     }
 
-    output[0] = '\0';
-
+    int offset = 0;
     for (int i = 0; i < word_count; i++) {
-        // Use 2 bytes (16 bits) of entropy and mask to 11 bits for wordlist index
         unsigned int index = ((entropy[i * 2] << 8) | entropy[i * 2 + 1]) & 0x7FF;
 
-        if (i > 0) {
-            strncat(output, " ", output_len - strlen(output) - 1);
+        int written = snprintf(output + offset, output_len - offset, "%s%s",
+                               (i > 0) ? " " : "", wordlist[index]);
+
+        if (written < 0 || written >= output_len - offset) {
+            fprintf(stderr, "Error generating password: buffer too small\n");
+            output[0] = '\0';
+            break;
         }
-        strncat(output, wordlist[index], output_len - strlen(output) - 1);
+        offset += written;
     }
 
     explicit_bzero(entropy, sizeof(entropy));
@@ -215,13 +221,12 @@ int validate_mnemonic(const char *mnemonic_phrase, char *error_reason, size_t re
 }
 
 int main(int argc, char *argv[]) {
-    // Handle --help flag
+
     if (argc == 2 && strcmp(argv[1], "--help") == 0) {
         print_usage(argv[0]);
         return 0;
     }
 
-    // Handle --validate flag
     if (argc == 3 && strcmp(argv[1], "--validate") == 0) {
         char reason[128] = {0};
         if (validate_mnemonic(argv[2], reason, sizeof(reason))) {
@@ -233,7 +238,6 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Handle --password flag
     if (argc == 3 && strcmp(argv[1], "--password") == 0) {
         int word_count = atoi(argv[2]);
         if (word_count < 1 || word_count > 100) {
@@ -250,7 +254,6 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
-    // Handle BIP39 mode (default)
     if (argc != 2) {
         print_usage(argv[0]);
         return 1;
