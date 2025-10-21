@@ -1,3 +1,9 @@
+# AI Assistants
+CLAUDE.md
+GEMINI.md
+
+.gitignore
+
 # Build artifacts
 bipass
 *.o
@@ -9,8 +15,3 @@ bipass
 *.swp
 *~
 
-# AI Assistants
-CLAUDE.md
-GEMINI.md
-
-.gitignore
