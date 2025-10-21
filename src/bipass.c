@@ -69,6 +69,57 @@ void generate_mnemonic(const char **wordlist, int word_count, char *output, size
     }
 }
 
+void generate_password(const char **wordlist, int word_count, char *output, size_t output_len) {
+    // Generate password mode: random words without BIP39 checksum
+    // Uses 2 bytes of entropy per word to cover full 2048 wordlist (11 bits needed)
+    int entropy_bytes = word_count * 2;
+    unsigned char entropy[200] = {0};  // Max 100 words * 2 bytes
+
+    if (generate_entropy(entropy, entropy_bytes) != 0) {
+        fprintf(stderr, "Failed to generate entropy\n");
+        return;
+    }
+
+    output[0] = '\0';
+
+    for (int i = 0; i < word_count; i++) {
+        // Use 2 bytes (16 bits) of entropy and mask to 11 bits for wordlist index
+        unsigned int index = ((entropy[i * 2] << 8) | entropy[i * 2 + 1]) & 0x7FF;
+
+        if (i > 0) {
+            strncat(output, " ", output_len - strlen(output) - 1);
+        }
+        strncat(output, wordlist[index], output_len - strlen(output) - 1);
+    }
+
+    explicit_bzero(entropy, sizeof(entropy));
+}
+
+void print_usage(const char *program_name) {
+    printf("Usage:\n");
+    printf("  BIP39 Mode (for cryptocurrency wallets):\n");
+    printf("    %s <word_count>\n", program_name);
+    printf("    Valid word counts: 12, 15, 18, 21, 24\n");
+    printf("    Generates BIP39-compliant mnemonic with checksum validation\n\n");
+
+    printf("  Password Mode (for secure passphrases):\n");
+    printf("    %s --password <word_count>\n", program_name);
+    printf("    Valid word counts: 1-100\n");
+    printf("    Generates random words without BIP39 checksum (not for crypto wallets)\n\n");
+
+    printf("  Validation:\n");
+    printf("    %s --validate \"<mnemonic>\"\n", program_name);
+    printf("    Validates a BIP39 mnemonic phrase\n\n");
+
+    printf("  Help:\n");
+    printf("    %s --help\n\n", program_name);
+
+    printf("Examples:\n");
+    printf("  %s 12                    # Generate 12-word BIP39 mnemonic\n", program_name);
+    printf("  %s --password 7          # Generate 7-word secure password\n", program_name);
+    printf("  %s --validate \"word1 word2...\" # Validate mnemonic\n", program_name);
+}
+
 int find_word_index(const char *word) {
     for (int i = 0; i < WORD_COUNT; i++) {
         if (strcasecmp(word, wordlist[i]) == 0) {
@@ -164,6 +215,13 @@ int validate_mnemonic(const char *mnemonic_phrase, char *error_reason, size_t re
 }
 
 int main(int argc, char *argv[]) {
+    // Handle --help flag
+    if (argc == 2 && strcmp(argv[1], "--help") == 0) {
+        print_usage(argv[0]);
+        return 0;
+    }
+
+    // Handle --validate flag
     if (argc == 3 && strcmp(argv[1], "--validate") == 0) {
         char reason[128] = {0};
         if (validate_mnemonic(argv[2], reason, sizeof(reason))) {
@@ -175,17 +233,34 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    // Handle --password flag
+    if (argc == 3 && strcmp(argv[1], "--password") == 0) {
+        int word_count = atoi(argv[2]);
+        if (word_count < 1 || word_count > 100) {
+            fprintf(stderr, "Invalid word count for password mode. Must be 1-100\n");
+            return 1;
+        }
+
+        char password[2048] = {0};
+        generate_password(wordlist, word_count, password, sizeof(password));
+
+        printf("%s\n", password);
+
+        explicit_bzero(password, sizeof(password));
+        return 0;
+    }
+
+    // Handle BIP39 mode (default)
     if (argc != 2) {
-        fprintf(stderr, "Usage: %s <word_count>\n", argv[0]);
-        fprintf(stderr, "   or: %s --validate \"<mnemonic>\"\n", argv[0]);
-        fprintf(stderr, "Valid word counts for generation: 12, 15, 18, 21, 24\n");
+        print_usage(argv[0]);
         return 1;
     }
 
     int word_count = atoi(argv[1]);
     if (word_count != 12 && word_count != 15 && word_count != 18 &&
         word_count != 21 && word_count != 24) {
-        fprintf(stderr, "Invalid word count. Must be 12, 15, 18, 21, or 24\n");
+        fprintf(stderr, "Invalid word count for BIP39 mode. Must be 12, 15, 18, 21, or 24\n");
+        fprintf(stderr, "For other word counts, use: %s --password <count>\n", argv[0]);
         return 1;
     }
 
